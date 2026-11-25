@@ -1,0 +1,15 @@
+name = "followers-city"
+main = "src/worker.js"
+compatibility_date = "2026-11-01"
+
+[assets]
+directory = "./public"
+binding = "ASSETS"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "city-db"
+database_id = "PUT_DATABASE_ID_HERE"
+
+[vars]
+SITE_URL = "https://followers-city.YOUR-SUBDOMAIN.workers.dev"
