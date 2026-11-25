@@ -42,15 +42,36 @@ async function ensureTable(env) {
     id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE, ig_id TEXT, name TEXT,
     token TEXT NOT NULL UNIQUE, created TEXT NOT NULL, comments INTEGER NOT NULL DEFAULT 1,
     house TEXT NOT NULL DEFAULT '{}')`).run();
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT, path TEXT, status INTEGER, note TEXT)`).run();
   ready = true;
 }
 
 function isManyChat(req, env) {
-  return env.CITY_SECRET && req.headers.get('x-city-secret') === env.CITY_SECRET;
+  const h = req.headers.get('x-city-secret');
+  return !!env.CITY_SECRET && h != null && h.trim() === env.CITY_SECRET.trim();
 }
 
 async function body(req) {
-  return req.json().catch(() => ({}));
+  const t = await req.text().catch(() => '');
+  req._raw = t;
+  try { return JSON.parse(t); } catch (e) { return {}; }
+}
+
+async function log(env, path, status, note) {
+  try {
+    await env.DB.prepare('INSERT INTO logs (at, path, status, note) VALUES (?, ?, ?, ?)')
+      .bind(new Date().toISOString(), path, status, String(note).slice(0, 300)).run();
+    await env.DB.prepare('DELETE FROM logs WHERE id <= (SELECT MAX(id) - 200 FROM logs)').run();
+  } catch (e) {}
+}
+
+function secretNote(req, env) {
+  const h = req.headers.get('x-city-secret');
+  if (!env.CITY_SECRET) return 'server secret not set';
+  if (h == null) return 'header missing';
+  if (h !== env.CITY_SECRET) return `header mismatch (len ${h.length} vs ${env.CITY_SECRET.length}, trimmed ${h.trim() === env.CITY_SECRET.trim() ? 'matches' : 'differs'})`;
+  return 'ok';
 }
 
 export default {
@@ -64,10 +85,10 @@ export default {
       await ensureTable(env);
       // ---------- ManyChat: معلّق جديد أو تعليق جديد ----------
       if (p === '/api/join' && req.method === 'POST') {
-        if (!isManyChat(req, env)) return J({ error: 'forbidden' }, 403);
         const b = await body(req);
+        if (!isManyChat(req, env)) { await log(env, p, 403, secretNote(req, env)); return J({ error: 'forbidden' }, 403); }
         const u = cleanUser(b.username);
-        if (!u) return J({ error: 'bad username' }, 400);
+        if (!u) { await log(env, p, 400, 'bad username; body: ' + req._raw); return J({ error: 'bad username' }, 400); }
         const name = cleanText(b.name, 40);
         const today = new Date().toISOString().slice(0, 10);
 
@@ -84,6 +105,7 @@ export default {
           ).bind(u).first();
           levelUp = LV(r.comments) > LV(r.comments - 1);
         }
+        await log(env, p, 200, `${u} new=${isNew}`);
         return J({
           is_new: isNew ? 'yes' : 'no',
           level_up: levelUp ? 'yes' : 'no',
