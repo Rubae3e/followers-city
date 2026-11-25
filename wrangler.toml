@@ -9,5 +9,5 @@ binding = "ASSETS"
 [[d1_databases]]
 binding = "DB"
 database_name = "city-db"
-database_id = "PUT_DATABASE_ID_HERE"
+database_id = "5f4c6472-fd02-4c3d-bc8e-05072972d40d"
 
