@@ -147,7 +147,10 @@ export default {
         const r = b.t && await env.DB.prepare('SELECT * FROM residents WHERE token = ?').bind(String(b.t)).first();
         if (!r) return J({ error: 'not found' }, 404);
         const color = Math.max(0, Math.min(COLORS - 1, parseInt(b.color, 10) || 0));
+        let old = {};
+        try { old = JSON.parse(r.house || '{}'); } catch (e) {}
         const house = {
+          ...(old.inside ? { inside: old.inside } : {}),
           color,
           roof: b.roof === 'pitched' ? 'pitched' : 'flat',
           tree: b.tree === 'tree' ? 'tree' : 'palm',
@@ -155,6 +158,23 @@ export default {
         };
         await env.DB.prepare('UPDATE residents SET house = ? WHERE id = ?').bind(JSON.stringify(house), r.id).run();
         return J({ ok: true, me: publicResident({ ...r, house: JSON.stringify(house) }) });
+      }
+
+      // ---------- الموقع: صاحب البيت يرتب داخل بيته ----------
+      if (p === '/api/inside' && req.method === 'POST') {
+        const b = await body(req);
+        const r = b.t && await env.DB.prepare('SELECT * FROM residents WHERE token = ?').bind(String(b.t)).first();
+        if (!r) return J({ error: 'not found' }, 404);
+        const TYPES = ['sofa', 'tv', 'carpet', 'shelf', 'plant', 'samovar', 'frame', 'table', 'lamp'];
+        const num = (v, lo, hi) => { const n = Number(v); return Number.isFinite(n) ? Math.max(lo, Math.min(hi, Math.round(n * 10) / 10)) : 0; };
+        const items = (Array.isArray(b.items) ? b.items : []).slice(0, 30)
+          .filter(it => it && TYPES.includes(it.k))
+          .map(it => ({ k: it.k, x: num(it.x, -4.3, 4.3), z: num(it.z, -4.3, 4.3), r: Math.max(0, Math.min(3, parseInt(it.r, 10) || 0)) }));
+        let h = {};
+        try { h = JSON.parse(r.house || '{}'); } catch (e) {}
+        h.inside = { wall: Math.max(0, Math.min(7, parseInt(b.wall, 10) || 0)), floor: Math.max(0, Math.min(3, parseInt(b.floor, 10) || 0)), items };
+        await env.DB.prepare('UPDATE residents SET house = ? WHERE id = ?').bind(JSON.stringify(h), r.id).run();
+        return J({ ok: true, me: publicResident({ ...r, house: JSON.stringify(h) }) });
       }
 
       // ---------- إلك انت: حذف ساكن مسيء ----------
