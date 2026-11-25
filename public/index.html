@@ -69,6 +69,8 @@ body.vig::after{content:'';position:fixed;inset:0;pointer-events:none;background
 .days .done{background:rgba(242,179,61,.25)}.days .now{background:var(--gold);color:#2a1d05}.days .now b{color:#2a1d05}
 .shopItem{display:flex;align-items:center;justify-content:space-between;gap:10px;background:rgba(255,255,255,.06);border-radius:14px;padding:10px 12px;margin-top:6px}
 .shopItem b{display:block}.shopItem small{color:#bfb39f}
+.shopItem input{width:90px;min-height:40px;padding:6px 8px}
+.tag{display:inline-block;font-size:12px;background:#b7463f;color:#fff;border-radius:8px;padding:1px 7px;margin-inline-start:6px}
 .rose{background:#b7463f!important;color:#fff!important}
 .topList{margin:4px 0 12px;padding:0;list-style:none;counter-reset:n}.topList li{display:flex;justify-content:space-between;padding:6px 4px;border-bottom:1px solid var(--line);font-size:15px}
 #loading{position:fixed;inset:0;display:grid;place-items:center;font-size:18px;background:#1b2230}
@@ -93,7 +95,7 @@ body.vig::after{content:'';position:fixed;inset:0;pointer-events:none;background
 <div class="row" style="margin-top:12px"><button class="btn gold" id="saveBtn">احفظ بيتي</button><button class="btn soft" id="mineInside">رتّب داخل بيتي</button><span id="status"></span></div>
 <p style="font-size:13px;color:#bfb39f">كل ما تعلّق أكثر على الصفحة، بيتك يصعد طابق. وبخمس تعليقات تنطيك المدينة سيارة كدام البيت.</p></div>
 <div class="badge" id="inTop"><h1 id="inTitle"></h1><small id="inSub"></small></div>
-<div class="sheet" id="sh-shop"><h2>سوق المدينة</h2><p>تجمع الدنانير من الهدية اليومية، ومن كل وردة تهديها أو توصلك.</p><div id="shopList"></div></div>
+<div class="sheet" id="sh-shop"><div class="row seg" id="shopTabs"><button class="btn soft on" data-t="city">سوق المدينة</button><button class="btn soft" data-t="souq">سوگ الجمعة</button><button class="btn soft" data-t="mine">أغراضي</button></div><p id="shopHint"></p><div id="shopList"></div></div>
 <div class="sheet" id="sh-furn"><h2>أضف أثاث</h2><p>اضغط على أي قطعة تنضاف بنص الغرفة، وبعدين اسحبها بإصبعك لمكانها.</p><div class="grid" id="furnGrid"></div></div>
 <div class="sheet" id="sh-look"><h2>لون الجدران</h2><div class="row" id="wallSw"></div><h2 style="margin-top:14px">الأرضية</h2><div class="row seg" id="floorSeg"></div></div>
 <div id="selBar"><button class="btn" id="rotBtn">تدوير</button><button class="btn" id="delBtn">حذف</button><button class="btn" id="desBtn">تم</button></div>
@@ -434,12 +436,33 @@ function showReward(){if(!me||!me.canClaim||demo)return;const next=me.streakAliv
   $('rwTxt').textContent=`ادخل كل يوم والهدية تكبر. اليوم ${ar(next)} من 7`;const d=$('rwDays');d.textContent='';
   REW.forEach((v,i)=>{const e=document.createElement('div');if(i+1<next)e.className='done';if(i+1===next)e.className='now';const b=document.createElement('b');b.textContent=ar(v);e.append('يوم '+ar(i+1),b);d.append(e)});$('reward').classList.add('open')}
 $('rwBtn').onclick=async()=>{const b=$('rwBtn');b.disabled=true;try{const r=await fetch('/api/claim',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({t:token})});const j=await r.json();if(j.me)syncMe(j.me);if(r.ok)toast(`+${ar(j.reward)} دينار 🪙`)}catch(e){}$('reward').classList.remove('open');b.disabled=false};
-$('coinPill').onclick=()=>{closeSheets();renderShop();$('sh-shop').classList.add('open')};
-function renderShop(){const L=$('shopList');L.textContent='';const own=(me&&me.o)||[];
-  Object.entries(RARE).forEach(([k,v])=>{const row=document.createElement('div');row.className='shopItem';const t=document.createElement('div'),b=document.createElement('b'),sm=document.createElement('small');b.textContent=v.n;sm.textContent=v.w;t.append(b,sm);
-    const btn=document.createElement('button');btn.className='btn '+(own.includes(k)?'soft':'gold');btn.textContent=own.includes(k)?'عندك ✓':'🪙 '+ar(v.p);btn.disabled=own.includes(k);btn.onclick=()=>buy(k,btn);row.append(t,btn);L.append(row)})}
-async function buy(k,btn){if((me.coins||0)<RARE[k].p){toast('دنانيرك ما تكفي بعد');return}btn.disabled=true;
-  try{const r=await fetch('/api/buy',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({t:token,item:k})});const j=await r.json();if(!r.ok)throw 0;syncMe(j.me);toast('اشتريت '+RARE[k].n+' 🎉');renderShop();if(k==='car'||k==='floor_plus'){build();flyTo(me.no-1)}}catch(e){toast('ما صار الشراء');btn.disabled=false}}
+$('coinPill').onclick=()=>{closeSheets();$('sh-shop').classList.add('open');renderShop()};
+let shopTab='city',market={listings:[],stock:{}};
+async function loadMarket(){try{const r=await fetch('/api/market',{cache:'no-store'});if(r.ok)market=await r.json()}catch(e){}}
+async function post(url,body){const r=await fetch(url,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({t:token,...body})});const j=await r.json().catch(()=>({}));if(j.me)syncMe(j.me);return {ok:r.ok,j}}
+function row(title,sub,right){const d=document.createElement('div');d.className='shopItem';const t=document.createElement('div'),b=document.createElement('b'),sm=document.createElement('small');b.textContent=title;sm.textContent=sub;t.append(b,sm);d.append(t,right);return d}
+function btn(txt,cls,fn){const b=document.createElement('button');b.className='btn '+cls;b.textContent=txt;b.onclick=fn;return b}
+async function renderShop(tab){if(tab)shopTab=tab;document.querySelectorAll('#shopTabs button').forEach(b=>b.classList.toggle('on',b.dataset.t===shopTab));
+  const L=$('shopList');L.textContent='';const own=(me&&me.o)||[];
+  if(shopTab==='city'){$('shopHint').textContent='تجمع الدنانير من الهدية اليومية، ومن كل وردة تهديها أو توصلك. القطع المعلّمة محدودة كل أسبوع.';await loadMarket();L.textContent='';
+    Object.entries(RARE).forEach(([k,v])=>{const left=market.stock[k];const sub=v.w+(left!=null?` · باقي ${ar(left)} هذا الأسبوع`:'');
+      const has=own.includes(k),out=left===0;const b=btn(has?'عندك ✓':out?'خلصت':'🪙 '+ar(v.p),has||out?'soft':'gold',()=>buy(k,b));b.disabled=has||out;L.append(row(v.n,sub,b))})}
+  else if(shopTab==='souq'){$('shopHint').textContent='قطع يبيعها السكان بأسعارهم. اشتري قبل لا يسبقك غيرك!';await loadMarket();L.textContent='';
+    if(!market.listings.length){const p=document.createElement('p');p.textContent='السوگ فارغ هسه. اعرض قطعة من «أغراضي» وكون أول بائع!';L.append(p)}
+    market.listings.forEach(x=>{const v=RARE[x.item];if(!v)return;const mine=me&&me.no===x.sno,has=own.includes(x.item);
+      const b=btn(mine?'عرضك':has?'عندك':'🪙 '+ar(x.price),mine||has?'soft':'gold',async()=>{if((me.coins||0)<x.price){toast('دنانيرك ما تكفي');return}b.disabled=true;const {ok,j}=await post('/api/market/buy',{id:x.id});if(ok){toast('اشتريت '+v.n+' من '+x.seller+' 🎉');if(x.item==='car'||x.item==='floor_plus'){build();flyTo(me.no-1)}renderShop()}else{toast(j.error==='gone'?'سبقك أحد واشتراها':'ما صار الشراء');renderShop()}});
+      b.disabled=mine||has;L.append(row(v.n,'البايع: '+x.seller,b))})}
+  else{$('shopHint').textContent='بيع للمدينة بنص السعر فوراً، أو اعرض بسوگ الجمعة بالسعر اللي تريده.';
+    (me.myListings||[]).forEach(x=>{const v=RARE[x.item];if(!v)return;L.append(row(v.n,`معروض بسوگ الجمعة بـ ${ar(x.price)} دينار`,btn('سحب العرض','soft',async()=>{const {ok}=await post('/api/unlist',{id:x.id});toast(ok?'رجعت القطعة لأغراضك':'ما صار');renderShop()})))});
+    if(!own.length&&!(me.myListings||[]).length){const p=document.createElement('p');p.textContent='ما عندك قطع نادرة بعد. اشتري من سوق المدينة أو سوگ الجمعة.';L.append(p)}
+    own.forEach(k=>{const v=RARE[k];if(!v)return;const box=document.createElement('div');box.style.cssText='display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end';
+      const inp=document.createElement('input');inp.type='number';inp.min=10;inp.max=5000;inp.value=v.p;inp.setAttribute('aria-label','السعر');
+      box.append(btn('بيع للمدينة 🪙'+ar(Math.floor(v.p/2)),'soft',async()=>{const {ok,j}=await post('/api/sell',{item:k});if(ok){toast(`+${ar(j.got)} دينار`);if(k==='car'||k==='floor_plus'){build()}}else toast('ما صار البيع');renderShop()}),inp,
+        btn('اعرض','gold',async()=>{const price=parseInt(inp.value,10);if(!(price>=10&&price<=5000)){toast('السعر بين 10 و5000');return}const {ok}=await post('/api/list',{item:k,price});if(ok){toast('انعرضت بسوگ الجمعة 🛒');if(k==='car'||k==='floor_plus')build()}else toast('ما صار العرض');renderShop('souq')}));
+      L.append(row(v.n,v.w,box))})}}
+document.querySelectorAll('#shopTabs button').forEach(b=>b.onclick=()=>renderShop(b.dataset.t));
+async function buy(k,b){if((me.coins||0)<RARE[k].p){toast('دنانيرك ما تكفي بعد');return}b.disabled=true;
+  const {ok,j}=await post('/api/buy',{item:k});if(ok){toast('اشتريت '+RARE[k].n+' 🎉');if(k==='car'||k==='floor_plus'){build();flyTo(me.no-1)}}else toast(j.error==='sold_out'?'خلصت هذا الأسبوع، دوّرها بسوگ الجمعة':'ما صار الشراء');renderShop()}
 function canRose(no){return me&&!demo&&me.no!==no&&!(me.gaveTo||[]).includes(no)&&(me.rosesLeft??0)>0}
 function paintRose(i){const p=P[i];if(!p)return;$('cRoses').textContent=`🌹 ${ar(p.rs||0)} وردة`;const ok=canRose(p.no),given=me&&(me.gaveTo||[]).includes(p.no);
   for(const id of ['roseBtn','inRose']){const b=$(id);b.hidden=!me||me.no===p.no;b.disabled=!ok;b.textContent=given?'🌹 أهديته اليوم':'🌹 اهدي وردة'}}
@@ -450,7 +473,7 @@ async function loadTop(){try{const r=await fetch('/api/top');if(!r.ok)throw 0;co
 function paintMineRoses(){if(!me)return;const v=(me.visitors||[]).map(x=>x.n);$('mineRoses').textContent=`🌹 وصلك ${ar(me.rs||0)} وردة`+(v.length?` · آخر الزوار: ${v.slice(0,4).join('، ')}`:'')}
 document.querySelector('#mainDock [data-s=search]').addEventListener('click',loadTop);
 document.querySelector('#mainDock [data-s=mine]').addEventListener('click',paintMineRoses);
-document.querySelector('#mainDock [data-s=shop]').addEventListener('click',renderShop);
+document.querySelector('#mainDock [data-s=shop]').addEventListener('click',()=>renderShop());
 
 /* ---------- loop ---------- */
 function resize(){const w=innerWidth,h=innerHeight;renderer.setSize(w,h,false);cam.aspect=w/h;cam.updateProjectionMatrix()}

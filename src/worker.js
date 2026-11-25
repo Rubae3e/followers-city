@@ -40,6 +40,23 @@ const REWARDS = [10, 15, 20, 30, 40, 60, 100];
 const BASIC = ['sofa', 'tv', 'carpet', 'shelf', 'plant', 'samovar', 'frame', 'table', 'lamp'];
 const INSIDE_RARE = ['lantern', 'oud', 'orange', 'aquarium', 'chandelier', 'fountain'];
 const bgDay = (offsetDays = 0) => new Date(Date.now() + 3 * 3600e3 + offsetDays * 86400e3).toISOString().slice(0, 10);
+const LIMITS = { chandelier: 10, fountain: 5, aquarium: 10, floor_plus: 5, car: 15 };
+function weekKey() {
+  const d = new Date(Date.now() + 3 * 3600e3); const day = (d.getUTCDay() + 6) % 7; // Monday = 0
+  d.setUTCDate(d.getUTCDate() - day); return d.toISOString().slice(0, 10);
+}
+async function stockLeft(env) {
+  const { results } = await env.DB.prepare('SELECT item, COUNT(*) AS c FROM purchases WHERE week = ? GROUP BY item').bind(weekKey()).all();
+  const used = Object.fromEntries(results.map(x => [x.item, x.c]));
+  return Object.fromEntries(Object.entries(LIMITS).map(([k, v]) => [k, Math.max(0, v - (used[k] || 0))]));
+}
+function stripItem(r, item) {
+  // remove an item from owned and from the interior layout
+  const own = ownedOf(r).filter(x => x !== item);
+  let h = {}; try { h = JSON.parse(r.house || '{}'); } catch (e) {}
+  if (h.inside && Array.isArray(h.inside.items)) h.inside.items = h.inside.items.filter(it => it.k !== item);
+  return { own, house: JSON.stringify(h) };
+}
 function ownedOf(r) { try { return JSON.parse(r.owned || '[]'); } catch (e) { return []; } }
 async function meFull(env, r) {
   const today = bgDay();
@@ -48,7 +65,8 @@ async function meFull(env, r) {
   ).bind(r.id).all();
   const given = await env.DB.prepare('SELECT COUNT(*) AS c FROM roses WHERE from_id = ? AND day = ?').bind(r.id, today).first();
   const { results: gaveTo } = await env.DB.prepare('SELECT to_id FROM roses WHERE from_id = ? AND day = ?').bind(r.id, today).all();
-  return { ...publicResident(r), coins: r.coins || 0, streak: r.streak || 0, canClaim: r.last_claim !== today, streakAlive: r.last_claim === bgDay(-1),
+  const { results: myListings } = await env.DB.prepare("SELECT id, item, price FROM listings WHERE seller_id = ? AND status = 'open' ORDER BY id DESC").bind(r.id).all();
+  return { ...publicResident(r), myListings, coins: r.coins || 0, streak: r.streak || 0, canClaim: r.last_claim !== today, streakAlive: r.last_claim === bgDay(-1),
     visitors: vis, rosesLeft: Math.max(0, 20 - (given?.c || 0)), gaveTo: gaveTo.map(x => x.to_id) };
 }
 async function byToken(env, t) {
@@ -70,6 +88,10 @@ async function ensureTable(env) {
     last_claim TEXT, roses INTEGER NOT NULL DEFAULT 0, owned TEXT NOT NULL DEFAULT '[]')`).run();
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS roses (id INTEGER PRIMARY KEY AUTOINCREMENT, from_id INTEGER NOT NULL,
     to_id INTEGER NOT NULL, day TEXT NOT NULL, at TEXT NOT NULL, UNIQUE(from_id, to_id, day))`).run();
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS purchases (id INTEGER PRIMARY KEY AUTOINCREMENT, item TEXT NOT NULL,
+    buyer_id INTEGER NOT NULL, week TEXT NOT NULL, at TEXT NOT NULL)`).run();
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS listings (id INTEGER PRIMARY KEY AUTOINCREMENT, seller_id INTEGER NOT NULL,
+    item TEXT NOT NULL, price INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'open', buyer_id INTEGER, created TEXT NOT NULL, sold_at TEXT)`).run();
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT, path TEXT, status INTEGER, note TEXT)`).run();
   ready = true;
@@ -254,11 +276,86 @@ export default {
         if (!price) return J({ error: 'bad item' }, 400);
         const own = ownedOf(r);
         if (own.includes(item)) return J({ error: 'owned' }, 409);
+        if (LIMITS[item] && (await stockLeft(env))[item] <= 0) return J({ error: 'sold_out' }, 410);
         own.push(item);
         const u = await env.DB.prepare('UPDATE residents SET coins = coins - ?, owned = ? WHERE id = ? AND coins >= ? RETURNING *')
           .bind(price, JSON.stringify(own), r.id, price).first();
         if (!u) return J({ error: 'poor' }, 402);
+        if (LIMITS[item]) await env.DB.prepare('INSERT INTO purchases (item, buyer_id, week, at) VALUES (?, ?, ?, ?)').bind(item, r.id, weekKey(), new Date().toISOString()).run();
         return J({ ok: true, me: await meFull(env, u) });
+      }
+
+      // ---------- بيع قطعة للمدينة بنص السعر ----------
+      if (p === '/api/sell' && req.method === 'POST') {
+        const b = await body(req);
+        const r = await byToken(env, b.t);
+        if (!r) return J({ error: 'not found' }, 404);
+        const item = String(b.item || '');
+        if (!SHOP[item] || !ownedOf(r).includes(item)) return J({ error: 'not owned' }, 400);
+        const back = Math.floor(SHOP[item] / 2);
+        const { own, house } = stripItem(r, item);
+        const u = await env.DB.prepare('UPDATE residents SET coins = coins + ?, owned = ?, house = ? WHERE id = ? AND owned = ? RETURNING *')
+          .bind(back, JSON.stringify(own), house, r.id, r.owned).first();
+        if (!u) return J({ error: 'retry' }, 409);
+        return J({ ok: true, got: back, me: await meFull(env, u) });
+      }
+
+      // ---------- سوگ الجمعة: عرض قطعة ----------
+      if (p === '/api/list' && req.method === 'POST') {
+        const b = await body(req);
+        const r = await byToken(env, b.t);
+        if (!r) return J({ error: 'not found' }, 404);
+        const item = String(b.item || ''), price = parseInt(b.price, 10);
+        if (!SHOP[item] || !ownedOf(r).includes(item)) return J({ error: 'not owned' }, 400);
+        if (!(price >= 10 && price <= 5000)) return J({ error: 'bad price' }, 400);
+        const { own, house } = stripItem(r, item);
+        const u = await env.DB.prepare('UPDATE residents SET owned = ?, house = ? WHERE id = ? AND owned = ? RETURNING *')
+          .bind(JSON.stringify(own), house, r.id, r.owned).first();
+        if (!u) return J({ error: 'retry' }, 409);
+        await env.DB.prepare('INSERT INTO listings (seller_id, item, price, created) VALUES (?, ?, ?, ?)').bind(r.id, item, price, new Date().toISOString()).run();
+        return J({ ok: true, me: await meFull(env, u) });
+      }
+
+      // ---------- سوگ الجمعة: سحب العرض ----------
+      if (p === '/api/unlist' && req.method === 'POST') {
+        const b = await body(req);
+        const r = await byToken(env, b.t);
+        if (!r) return J({ error: 'not found' }, 404);
+        const l = await env.DB.prepare("UPDATE listings SET status = 'cancelled' WHERE id = ? AND seller_id = ? AND status = 'open' RETURNING *").bind(parseInt(b.id, 10), r.id).first();
+        if (!l) return J({ error: 'gone' }, 409);
+        const fresh = await env.DB.prepare('SELECT * FROM residents WHERE id = ?').bind(r.id).first();
+        const own = ownedOf(fresh); if (!own.includes(l.item)) own.push(l.item);
+        const u = await env.DB.prepare('UPDATE residents SET owned = ? WHERE id = ? RETURNING *').bind(JSON.stringify(own), r.id).first();
+        return J({ ok: true, me: await meFull(env, u) });
+      }
+
+      // ---------- سوگ الجمعة: شراء من ساكن ----------
+      if (p === '/api/market/buy' && req.method === 'POST') {
+        const b = await body(req);
+        const r = await byToken(env, b.t);
+        if (!r) return J({ error: 'not found' }, 404);
+        const l = await env.DB.prepare("SELECT * FROM listings WHERE id = ? AND status = 'open'").bind(parseInt(b.id, 10)).first();
+        if (!l) return J({ error: 'gone' }, 409);
+        if (l.seller_id === r.id) return J({ error: 'own listing' }, 400);
+        if (ownedOf(r).includes(l.item)) return J({ error: 'owned' }, 409);
+        const paid = await env.DB.prepare('UPDATE residents SET coins = coins - ? WHERE id = ? AND coins >= ? RETURNING id').bind(l.price, r.id, l.price).first();
+        if (!paid) return J({ error: 'poor' }, 402);
+        const sold = await env.DB.prepare("UPDATE listings SET status = 'sold', buyer_id = ?, sold_at = ? WHERE id = ? AND status = 'open' RETURNING *")
+          .bind(r.id, new Date().toISOString(), l.id).first();
+        if (!sold) { await env.DB.prepare('UPDATE residents SET coins = coins + ? WHERE id = ?').bind(l.price, r.id).run(); return J({ error: 'gone' }, 409); }
+        await env.DB.prepare('UPDATE residents SET coins = coins + ? WHERE id = ?').bind(l.price, l.seller_id).run();
+        const fresh = await env.DB.prepare('SELECT * FROM residents WHERE id = ?').bind(r.id).first();
+        const own = ownedOf(fresh); if (!own.includes(l.item)) own.push(l.item);
+        const u = await env.DB.prepare('UPDATE residents SET owned = ? WHERE id = ? RETURNING *').bind(JSON.stringify(own), r.id).first();
+        return J({ ok: true, me: await meFull(env, u) });
+      }
+
+      // ---------- سوگ الجمعة: العروض والمخزون ----------
+      if (p === '/api/market' && req.method === 'GET') {
+        const { results } = await env.DB.prepare(
+          "SELECT l.id, l.item, l.price, l.seller_id AS sno, r.username AS seller FROM listings l JOIN residents r ON r.id = l.seller_id WHERE l.status = 'open' ORDER BY l.id DESC LIMIT 60"
+        ).all();
+        return J({ listings: results, stock: await stockLeft(env) });
       }
 
       // ---------- لوحة الشرف ----------
