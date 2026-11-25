@@ -57,6 +57,7 @@ body.inside #inTop{display:block}body.inside #inDock{display:flex}body.inside #m
 body.vig::after{content:'';position:fixed;inset:0;pointer-events:none;background:radial-gradient(ellipse at 50% 45%,rgba(0,0,0,0) 55%,rgba(0,0,0,.45))}
 .hint{font-size:13px;color:#bfb39f;text-align:center;margin-top:4px}
 #coinPill{pointer-events:auto;display:inline-flex;align-items:center;gap:6px;background:var(--gold);color:#2a1d05;font-weight:800;border-radius:999px;padding:6px 14px;font-size:16px;border:0;min-height:40px;cursor:pointer}
+#coinPill[hidden],[hidden]{display:none!important}
 #toast{position:fixed;top:30%;left:50%;transform:translate(-50%,0);background:rgba(20,22,30,.92);color:#fff;font-weight:800;font-size:20px;padding:14px 24px;border-radius:18px;border:2px solid var(--gold);opacity:0;pointer-events:none;transition:.35s;z-index:20}
 #toast.show{opacity:1;transform:translate(-50%,-14px)}
 #reward{position:fixed;inset:0;background:rgba(8,10,18,.72);display:none;place-items:center;z-index:15;padding:20px}
@@ -74,7 +75,7 @@ body.vig::after{content:'';position:fixed;inset:0;pointer-events:none;background
 .rose{background:#b7463f!important;color:#fff!important}
 .topList{margin:4px 0 12px;padding:0;list-style:none;counter-reset:n}.topList li{display:flex;justify-content:space-between;padding:6px 4px;border-bottom:1px solid var(--line);font-size:15px}
 #loading{position:fixed;inset:0;display:grid;place-items:center;font-size:18px;background:#1b2230}
-@media(max-width:600px){.badge h1{font-size:17px}.dock button{padding:0 10px;font-size:14px}.banner{display:none!important}}
+@media(max-width:600px){.badge h1{font-size:17px}.dock button{padding:0 10px;font-size:14px}.top{flex-wrap:wrap}.banner{order:3;max-width:100%;font-size:13px}}
 @media(prefers-reduced-motion:reduce){.sheet{transition:none}}
 </style>
 </head>
@@ -83,11 +84,15 @@ body.vig::after{content:'';position:fixed;inset:0;pointer-events:none;background
 <div id="loading">جاري بناء المدينة…</div>
 <div class="top"><div class="badge"><h1 id="cityName"></h1><small id="stats"></small></div><button id="coinPill" hidden>🪙 <span id="coinN">0</span></button><div class="banner" id="banner"></div></div>
 <div id="toast"></div>
+<div id="shareM" style="position:fixed;inset:0;background:rgba(8,10,18,.85);display:none;place-items:center;z-index:16;padding:16px"><div style="width:min(380px,100%);text-align:center"><img id="shareImg" alt="صورة بيتك للمشاركة" style="width:100%;border-radius:18px;border:2px solid var(--gold)"><p style="color:#d9cfbd;font-size:13px;margin:8px 0">إذا ما اشتغل زر المشاركة: اضغط مطولاً على الصورة واحفظها، وانشرها ستوري.</p><div class="row" style="justify-content:center"><button class="btn gold" id="shareGo">مشاركة</button><a class="btn soft" id="shareDl" download="baiti.png" style="display:inline-grid;place-items:center;text-decoration:none">تنزيل</a><button class="btn soft" id="shareX">إغلاق</button></div></div></div>
 <div id="reward"><div class="box"><h2>هديتك اليومية 🎁</h2><p id="rwTxt"></p><div class="days" id="rwDays"></div><button class="btn gold" id="rwBtn" style="width:100%">استلم</button></div></div>
 <div class="card" id="card"><button class="btn x" id="cardX" aria-label="إغلاق">✕</button><b id="cName"></b><q id="cMsg"></q><dl><dt>رقم البيت</dt><dd id="cNo"></dd><dt>العنوان</dt><dd id="cSt"></dd><dt>تعليقاته</dt><dd id="cC"></dd><dt>سكن بتاريخ</dt><dd id="cT"></dd></dl><a id="cIg" target="_blank" rel="noopener">صفحته على انستغرام</a><div class="row" style="margin-top:10px"><button class="btn gold" id="cEnter">ادخل البيت</button><button class="btn rose" id="roseBtn">🌹 اهدي وردة</button></div><small id="cRoses" style="display:block;margin-top:6px;color:#ffd6d0"></small></div>
 <div class="sheet" id="sh-search"><h2>لوحة الشرف هذا الأسبوع</h2><p style="margin:0">🌹 أكثر بيت وصله ورد</p><ol class="topList" id="topLoved"></ol><p style="margin:0">💐 أكرم زائر</p><ol class="topList" id="topGivers"></ol><h2>دوّر على ساكن</h2><input id="q" placeholder="اكتب اليوزر"><div class="list" id="res"></div></div>
 <div class="sheet" id="sh-mine"><h2>بيتي</h2>
 <p id="mineInfo"></p><p id="mineRoses" style="color:#ffd6d0"></p>
+<div class="row" style="margin:6px 0 4px"><button class="btn gold" id="shareBtn">شارك بيتك 📸</button><button class="btn rose" id="inviteBtn">ادعي صديق 🎁</button></div>
+<p id="invInfo" style="font-size:13px;color:#bfb39f;margin:2px 0"></p>
+<div id="refBox" hidden style="background:rgba(242,179,61,.12);border:1px solid rgba(242,179,61,.4);border-radius:14px;padding:10px;margin:8px 0"><p style="margin:0 0 6px">منو دعاك للمدينة؟ اكتب يوزره وتاخذون <b>100 دينار</b> انتم الاثنين 🎁</p><div class="row"><input id="refIn" placeholder="يوزر صديقك" style="flex:1"><button class="btn gold" id="refGo">تأكيد</button></div></div>
 <h3>لون البيت</h3><div class="row" id="swatches"></div>
 <h3>السطح</h3><div class="row seg" id="roofSeg"><button class="btn soft" data-v="flat">سطح بغدادي</button><button class="btn soft" data-v="pitched">سقف قرميد</button></div>
 <h3>الحديقة</h3><div class="row seg" id="treeSeg"><button class="btn soft" data-v="palm">نخلة</button><button class="btn soft" data-v="tree">شجرة</button></div>
@@ -475,6 +480,35 @@ document.querySelector('#mainDock [data-s=search]').addEventListener('click',loa
 document.querySelector('#mainDock [data-s=mine]').addEventListener('click',paintMineRoses);
 document.querySelector('#mainDock [data-s=shop]').addEventListener('click',()=>renderShop());
 
+/* ---------- share my house + invite a friend ---------- */
+const IG='follow_city26';
+let refStored=null;try{const u=new URL(location.href),rf=u.searchParams.get('ref');if(rf){localStorage.setItem('cityRef',rf.replace(/^@/,'').toLowerCase());u.searchParams.delete('ref');history.replaceState(null,'',u.pathname+(u.search||''))}refStored=localStorage.getItem('cityRef')}catch(e){}
+function rrect(x,X,Y,w,h,r){x.beginPath();x.moveTo(X+r,Y);x.arcTo(X+w,Y,X+w,Y+h,r);x.arcTo(X+w,Y+h,X,Y+h,r);x.arcTo(X,Y+h,X,Y,r);x.arcTo(X,Y,X+w,Y,r);x.closePath()}
+function shotHouse(){const h=houses[me.no-1];if(!h)return null;const pr=renderer.getPixelRatio(),sz=new THREE.Vector2();renderer.getSize(sz);const sp=cam.position.clone(),st=controls.target.clone(),sa=cam.aspect;
+  renderer.setPixelRatio(1);renderer.setSize(1000,1000,false);cam.aspect=1;cam.updateProjectionMatrix();cam.position.set(h.x+20,h.H+17,h.z+24);cam.lookAt(h.x,h.H*.55,h.z);
+  for(const l of labels)l.visible=l.position.distanceTo(cam.position)<70;ring.visible=false;renderer.render(scene,cam);
+  const c=document.createElement('canvas');c.width=c.height=1000;c.getContext('2d').drawImage(renderer.domElement,0,0,1000,1000);
+  renderer.setPixelRatio(pr);renderer.setSize(sz.x,sz.y,false);cam.aspect=sa;cam.updateProjectionMatrix();cam.position.copy(sp);controls.target.copy(st);return c}
+function makeCard(){const shot=shotHouse();const c=document.createElement('canvas');c.width=1080;c.height=1920;const x=c.getContext('2d');
+  const g=x.createLinearGradient(0,0,0,1920);g.addColorStop(0,'#141a2b');g.addColorStop(.6,'#1f2638');g.addColorStop(1,'#3a2a12');x.fillStyle=g;x.fillRect(0,0,1080,1920);
+  x.textAlign='center';x.direction='rtl';x.fillStyle='#f2b33d';x.font='800 64px Cairo, sans-serif';x.fillText(CITY_NAME,540,150);x.fillStyle='#ffffff';x.font='800 84px Cairo, sans-serif';x.fillText('هذا بيتي 🏠',540,265);
+  x.save();rrect(x,60,330,960,960,48);x.clip();if(shot)x.drawImage(shot,60,330,960,960);x.restore();x.lineWidth=8;x.strokeStyle='#f2b33d';rrect(x,60,330,960,960,48);x.stroke();
+  x.fillStyle='#ffffff';x.direction='ltr';x.font='800 72px Cairo, sans-serif';x.fillText(me.n,540,1400);x.direction='rtl';x.fillStyle='#e8dcc6';x.font='700 46px Cairo, sans-serif';x.fillText(`بيت رقم ${ar(me.no)}   ·   🌹 ${ar(me.rs||0)} وردة`,540,1480);
+  x.fillStyle='#f2b33d';rrect(x,110,1570,860,230,46);x.fill();x.fillStyle='#2a1d05';x.font='800 58px Cairo, sans-serif';x.fillText('تريد بيت باسمك؟',540,1660);x.direction='ltr';x.font='800 54px Cairo, sans-serif';x.fillText('@'+IG,540,1740);x.direction='rtl';
+  x.fillStyle='#d9cfbd';x.font='700 38px Cairo, sans-serif';x.fillText('علّق على أي ريل ويوصلك مفتاح بيتك',540,1870);return c}
+let shareBlob=null;
+$('shareBtn').onclick=()=>{if(!me)return;closeSheets();const c=makeCard();c.toBlob(b=>{shareBlob=b;const url=URL.createObjectURL(b);$('shareImg').src=url;$('shareDl').href=url;$('shareM').style.display='grid'},'image/png')};
+$('shareX').onclick=()=>{$('shareM').style.display='none'};
+$('shareGo').onclick=async()=>{try{const f=new File([shareBlob],'baiti.png',{type:'image/png'});if(navigator.canShare&&navigator.canShare({files:[f]})){await navigator.share({files:[f],text:`بيتي بمدينة المتابعين 🏠 علّق عند @${IG} وخذ بيتك`});}else toast('احفظ الصورة وانشرها ستوري 👆')}catch(e){}};
+function inviteText(){return `دعوتك لمدينة المتابعين 🏙️\nعلّق على أي ريل عند @${IG} بانستا ويوصلك بيت باسمك.\nوبعدها اكتب يوزري (${me.n}) بخانة «منو دعاك؟» وناخذ 100 دينار انا وانت 🎁`}
+$('inviteBtn').onclick=async()=>{if(!me)return;const url=location.origin+'/?ref='+encodeURIComponent(me.n),text=inviteText();
+  try{if(navigator.share){await navigator.share({text,url});return}}catch(e){return}
+  try{await navigator.clipboard.writeText(text+'\n'+url);toast('انتسخت الدعوة، الصقها لصديقك 📋')}catch(e){toast('ما كدرت أنسخ')}};
+function paintRef(){if(!me)return;$('invInfo').textContent=me.invited?`دعيت ${ar(me.invited)} صديق 🎉`:'كل صديق يجي بدعوتك = 100 دينار إلك وإله';$('refBox').hidden=!me.canBeReferred;if(refStored&&!$('refIn').value)$('refIn').value=refStored}
+async function doRefer(ref,silent){const {ok,j}=await post('/api/refer',{ref});if(ok){toast(`🎁 +100 دينار! دعاك ${j.inviter}`);try{localStorage.removeItem('cityRef')}catch(e){}refStored=null;paintRef()}else if(!silent)toast(j.error==='no such resident'?'ماكو ساكن بهذا اليوزر':j.error==='not allowed'?'لازم يكون ساكن قبلك':'ما صار');return ok}
+$('refGo').onclick=()=>{const v=$('refIn').value.trim().replace(/^@/,'').toLowerCase();if(v)doRefer(v,false)};
+document.querySelector('#mainDock [data-s=mine]').addEventListener('click',paintRef);
+
 /* ---------- loop ---------- */
 function resize(){const w=innerWidth,h=innerHeight;renderer.setSize(w,h,false);cam.aspect=w/h;cam.updateProjectionMatrix()}
 addEventListener('resize',resize);
@@ -489,7 +523,7 @@ function loop(now){const dt=Math.min(.05,(now-last)/1000);last=now;
   for(const s of labels)s.visible=s.userData.mine||s.position.distanceTo(cam.position)<LBL;
   if(ring&&ring.visible)ring.scale.setScalar(1+Math.sin(now/300)*.06);
   renderer.render(scene,cam);requestAnimationFrame(loop)}
-Promise.all([document.fonts?document.fonts.ready:0,load()]).then(()=>{resize();build();cam.position.set(70,85,110);controls.target.set(0,0,0);$('loading').remove();requestAnimationFrame(loop);paintCoins();if(me){setTimeout(()=>flyTo(me.no-1),600);setTimeout(showReward,1400)}});
+Promise.all([document.fonts?document.fonts.ready:0,load()]).then(()=>{resize();build();cam.position.set(70,85,110);controls.target.set(0,0,0);$('loading').remove();requestAnimationFrame(loop);paintCoins();if(me){setTimeout(()=>flyTo(me.no-1),600);setTimeout(showReward,1400);if(refStored&&me.canBeReferred&&refStored!==me.n)setTimeout(()=>doRefer(refStored,true),2600)}else if(refStored&&!demo){const bn=$('banner');bn.textContent=`${refStored} دعاك للمدينة! علّق على أي ريل عند @${IG} بانستا، وتاخذون 100 دينار انتم الاثنين 🎁`;bn.style.display='block'}});
 }
 </script>
 </body>

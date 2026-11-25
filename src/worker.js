@@ -66,7 +66,9 @@ async function meFull(env, r) {
   const given = await env.DB.prepare('SELECT COUNT(*) AS c FROM roses WHERE from_id = ? AND day = ?').bind(r.id, today).first();
   const { results: gaveTo } = await env.DB.prepare('SELECT to_id FROM roses WHERE from_id = ? AND day = ?').bind(r.id, today).all();
   const { results: myListings } = await env.DB.prepare("SELECT id, item, price FROM listings WHERE seller_id = ? AND status = 'open' ORDER BY id DESC").bind(r.id).all();
-  return { ...publicResident(r), myListings, coins: r.coins || 0, streak: r.streak || 0, canClaim: r.last_claim !== today, streakAlive: r.last_claim === bgDay(-1),
+  const inv = await env.DB.prepare('SELECT COUNT(*) AS c FROM residents WHERE referred_by = ?').bind(r.id).first();
+  const ageDays = (Date.parse(bgDay()) - Date.parse(r.created)) / 86400e3;
+  return { ...publicResident(r), myListings, invited: inv?.c || 0, canBeReferred: !r.referred_by && ageDays <= 3, coins: r.coins || 0, streak: r.streak || 0, canClaim: r.last_claim !== today, streakAlive: r.last_claim === bgDay(-1),
     visitors: vis, rosesLeft: Math.max(0, 20 - (given?.c || 0)), gaveTo: gaveTo.map(x => x.to_id) };
 }
 async function byToken(env, t) {
@@ -85,7 +87,7 @@ async function ensureTable(env) {
     id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE, ig_id TEXT, name TEXT,
     token TEXT NOT NULL UNIQUE, created TEXT NOT NULL, comments INTEGER NOT NULL DEFAULT 1,
     house TEXT NOT NULL DEFAULT '{}', coins INTEGER NOT NULL DEFAULT 0, streak INTEGER NOT NULL DEFAULT 0,
-    last_claim TEXT, roses INTEGER NOT NULL DEFAULT 0, owned TEXT NOT NULL DEFAULT '[]')`).run();
+    last_claim TEXT, roses INTEGER NOT NULL DEFAULT 0, owned TEXT NOT NULL DEFAULT '[]', referred_by INTEGER)`).run();
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS roses (id INTEGER PRIMARY KEY AUTOINCREMENT, from_id INTEGER NOT NULL,
     to_id INTEGER NOT NULL, day TEXT NOT NULL, at TEXT NOT NULL, UNIQUE(from_id, to_id, day))`).run();
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS purchases (id INTEGER PRIMARY KEY AUTOINCREMENT, item TEXT NOT NULL,
@@ -356,6 +358,25 @@ export default {
           "SELECT l.id, l.item, l.price, l.seller_id AS sno, r.username AS seller FROM listings l JOIN residents r ON r.id = l.seller_id WHERE l.status = 'open' ORDER BY l.id DESC LIMIT 60"
         ).all();
         return J({ listings: results, stock: await stockLeft(env) });
+      }
+
+      // ---------- ادعي صديق: الصديق يكتب منو دعاه، والاثنين ياخذون 100 ----------
+      if (p === '/api/refer' && req.method === 'POST') {
+        const b = await body(req);
+        const r = await byToken(env, b.t);
+        if (!r) return J({ error: 'not found' }, 404);
+        if (r.referred_by) return J({ error: 'already' }, 409);
+        if ((Date.parse(bgDay()) - Date.parse(r.created)) / 86400e3 > 3) return J({ error: 'too late' }, 410);
+        const ref = cleanUser(b.ref);
+        const inviter = ref && await env.DB.prepare('SELECT id, username FROM residents WHERE username = ?').bind(ref).first();
+        if (!inviter) return J({ error: 'no such resident' }, 404);
+        if (inviter.id === r.id || inviter.id > r.id) return J({ error: 'not allowed' }, 400);
+        const cnt = await env.DB.prepare('SELECT COUNT(*) AS c FROM residents WHERE referred_by = ?').bind(inviter.id).first();
+        if ((cnt?.c || 0) >= 100) return J({ error: 'limit' }, 429);
+        const u = await env.DB.prepare('UPDATE residents SET referred_by = ?, coins = coins + 100 WHERE id = ? AND referred_by IS NULL RETURNING *').bind(inviter.id, r.id).first();
+        if (!u) return J({ error: 'already' }, 409);
+        await env.DB.prepare('UPDATE residents SET coins = coins + 100 WHERE id = ?').bind(inviter.id).run();
+        return J({ ok: true, inviter: inviter.username, me: await meFull(env, u) });
       }
 
       // ---------- لوحة الشرف ----------
