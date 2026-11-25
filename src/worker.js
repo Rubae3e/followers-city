@@ -30,8 +30,19 @@ function publicResident(r) {
   return { no: r.id, n: r.username, d: r.name || '', t: r.created, c: r.comments, h };
 }
 
+let SITE = '';
 function linkFor(env, r) {
-  return `${env.SITE_URL.replace(/\/$/, '')}/?t=${r.token}`;
+  return `${(env.SITE_URL || SITE).replace(/\/$/, '')}/?t=${r.token}`;
+}
+
+let ready = false;
+async function ensureTable(env) {
+  if (ready) return;
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS residents (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE, ig_id TEXT, name TEXT,
+    token TEXT NOT NULL UNIQUE, created TEXT NOT NULL, comments INTEGER NOT NULL DEFAULT 1,
+    house TEXT NOT NULL DEFAULT '{}')`).run();
+  ready = true;
 }
 
 function isManyChat(req, env) {
@@ -48,7 +59,9 @@ export default {
     const p = url.pathname;
     if (!p.startsWith('/api/')) return env.ASSETS.fetch(req);
 
+    SITE = url.origin;
     try {
+      await ensureTable(env);
       // ---------- ManyChat: معلّق جديد أو تعليق جديد ----------
       if (p === '/api/join' && req.method === 'POST') {
         if (!isManyChat(req, env)) return J({ error: 'forbidden' }, 403);
@@ -86,7 +99,7 @@ export default {
         if (!isManyChat(req, env)) return J({ error: 'forbidden' }, 403);
         const u = cleanUser((await body(req)).username);
         const r = u && await env.DB.prepare('SELECT * FROM residents WHERE username = ?').bind(u).first();
-        if (!r) return J({ found: 'no', link: env.SITE_URL });
+        if (!r) return J({ found: 'no', link: env.SITE_URL || SITE });
         return J({ found: 'yes', house_no: String(r.id), link: linkFor(env, r) });
       }
 

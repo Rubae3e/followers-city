@@ -11,5 +11,3 @@ binding = "DB"
 database_name = "city-db"
 database_id = "PUT_DATABASE_ID_HERE"
 
-[vars]
-SITE_URL = "https://followers-city.YOUR-SUBDOMAIN.workers.dev"
