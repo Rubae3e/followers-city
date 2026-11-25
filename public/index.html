@@ -125,10 +125,10 @@ async function load(){
 let bodies=[],labels=[],houses=[],bounds,streets={},cars=[],ring;
 function build(){
   world.clear();bodies=[];labels=[];houses=[];houseMats.length=0;for(const k in matCache)delete matCache[k];streets={};
-  const nb=1+Math.max(1,Math.ceil(P.length/4)),coords=spiral(nb);
+  const nb=2+Math.max(1,Math.ceil(P.length/4)),coords=spiral(nb);
   let mnx=0,mxx=0,mnz=0,mxz=0;for(const[x,z]of coords){mnx=Math.min(mnx,x);mxx=Math.max(mxx,x);mnz=Math.min(mnz,z);mxz=Math.max(mxz,z)}
   bounds={x0:(mnx-.5)*S-R/2,x1:(mxx+.5)*S+R/2,z0:(mnz-.5)*S-R/2,z1:(mxz+.5)*S+R/2,mnx,mxx,mnz,mxz};
-  coords.forEach(([bx,bz],b)=>{if(!b)return;const p=P.slice(4*(b-1),4*b).find(Boolean);if(!p)return;const nm='شارع '+p.n;if(!streets['r'+bz])streets['r'+bz]=nm;if(!streets['c'+bx])streets['c'+bx]=nm});
+  coords.forEach(([bx,bz],b)=>{if(b<2)return;const p=P.slice(4*(b-2),4*(b-1)).find(Boolean);if(!p)return;const nm='شارع '+p.n;if(!streets['r'+bz])streets['r'+bz]=nm;if(!streets['c'+bx])streets['c'+bx]=nm});
   const w=bounds.x1-bounds.x0,d=bounds.z1-bounds.z0,cx=(bounds.x0+bounds.x1)/2,cz=(bounds.z0+bounds.z1)/2;
   mesh(G.box,MAT.road,w,.1,d,cx,0,cz,null,false);
   const dash=document.createElement('canvas');dash.width=64;dash.height=8;const dx=dash.getContext('2d');dx.fillStyle='#e9e2c9';dx.fillRect(0,2,32,4);
@@ -138,8 +138,9 @@ function build(){
   coords.forEach(([bx,bz],b)=>{
     const X=bx*S,Z=bz*S;mesh(G.box,MAT.walk,B,.3,B,X,.15,Z,null,false);lamp(X+B/2-.6,Z+B/2-.6);
     if(!b){plaza(X,Z);return}
+    if(b===1){mosque(X,Z);return}
     for(const[k,vert]of[['r'+bz,0],['c'+bx,1]]){if(!streets[k])continue;const c=textCanvas(streets[k],40,null,'rgba(255,248,230,.85)'),m=new THREE.Mesh(new THREE.PlaneGeometry(c.width/c.height*2.2,2.2),new THREE.MeshBasicMaterial({map:tex(c),transparent:true,depthWrite:false}));if(vert){m.rotation.set(-Math.PI/2,0,-Math.PI/2);m.position.set(X+S/2-1.6,.09,Z-6)}else{m.rotation.set(-Math.PI/2,0,0);m.position.set(X+6,.09,Z+S/2+1.6)}world.add(m)}
-    [[-1,-1],[1,-1],[-1,1],[1,1]].forEach(([sx,sz],q)=>{const i=4*(b-1)+q,p=P[i],lx=X+sx*6,lz=Z+sz*6;
+    [[-1,-1],[1,-1],[-1,1],[1,1]].forEach(([sx,sz],q)=>{const i=4*(b-2)+q,p=P[i],lx=X+sx*6,lz=Z+sz*6;
       if(!p){mesh(G.box,MAT.dirt,10,.12,10,lx,.36,lz,null,false);const s=label('قطعة فارغة',1.1,'rgba(60,50,40,.7)','#e8dcc6',null,36);s.position.set(lx,1.6,lz);world.add(s);return}
       mesh(G.box,MAT.grass,10.4,.1,10.4,lx,.35,lz,null,false);
       const r=rnd(hash(p.n)),h=p.h||{},fl=LV(p.c||1),col=WALLS[h.color!=null?h.color:Math.floor(r()*WALLS.length)],pitched=h.roof?h.roof==='pitched':r()<.35,palm=h.tree?h.tree==='palm':r()<.6;
@@ -166,6 +167,37 @@ function build(){
   else bn.style.display='none';
   $('mineBtn').hidden=!me;
 }
+let mosqueMat=null;
+function mosqueWall(){if(mosqueMat)return mosqueMat;const W=256,H=128,a=document.createElement('canvas'),e=document.createElement('canvas');a.width=e.width=W;a.height=e.height=H;const x=a.getContext('2d'),y=e.getContext('2d');
+  x.fillStyle='#e9dcc0';x.fillRect(0,0,W,H);x.fillStyle='#2f7f8f';x.fillRect(0,8,W,10);x.fillStyle='#d9b25a';x.fillRect(0,18,W,3);y.fillStyle='#000';y.fillRect(0,0,W,H);
+  for(let i=0;i<4;i++){const cx=32+i*64;const arch=(c,col)=>{c.fillStyle=col;c.beginPath();c.moveTo(cx-14,H-14);c.lineTo(cx-14,62);c.quadraticCurveTo(cx-14,38,cx,32);c.quadraticCurveTo(cx+14,38,cx+14,62);c.lineTo(cx+14,H-14);c.closePath();c.fill()};
+    x.save();x.translate(0,0);arch(x,'#c9a96a');x.restore();x.save();x.translate(0,0);x.scale(1,1);arch(x,'#1f3d4a');x.restore();arch(y,'#ffd78a')}
+  const ma=new THREE.MeshStandardMaterial({map:tex(a),emissiveMap:tex(e),emissive:0xffffff,emissiveIntensity:night?1:0,roughness:.9});houseMats.push(ma);return mosqueMat=ma}
+function mosque(X,Z){mosqueMat=null;
+  mesh(G.box,MAT.stone,B-2,.2,B-2,X,.4,Z,null,false);
+  const wall=mosqueWall(),top=M('#e9dcc0');
+  mesh(G.box,[wall,wall,top,top,wall,wall],14,6,14,X,3.5,Z);
+  mesh(G.box,M('#d9b25a'),14.6,.5,14.6,X,6.7,Z);
+  const tile=new THREE.MeshStandardMaterial({color:'#1f8fa6',roughness:.35,metalness:.15,emissive:'#0d4652',emissiveIntensity:.25});
+  mesh(G.cyl,M('#e9dcc0'),4.6,2.4,4.6,X,8.1,Z);
+  mesh(G.cyl,M('#d9b25a'),4.8,.4,4.8,X,9.4,Z,null,false);
+  const dome=new THREE.SphereGeometry(1,28,16,0,Math.PI*2,0,Math.PI/2);
+  mesh(dome,tile,4.6,5.6,4.6,X,9.5,Z);
+  const gold=new THREE.MeshStandardMaterial({color:'#e8b84a',metalness:.6,roughness:.3,emissive:'#7a5a10',emissiveIntensity:.3});
+  mesh(G.cyl,gold,.15,1.6,.15,X,15.8,Z,null,false);mesh(G.sph,gold,.45,.45,.45,X,15.3,Z,null,false);
+  const cres=new THREE.Mesh(new THREE.TorusGeometry(.55,.14,8,20,Math.PI*1.4),gold);cres.position.set(X,17.1,Z);cres.rotation.z=Math.PI*.8;world.add(cres);
+  for(const sx of [-1,1]){const mx=X+sx*8.6,mz=Z-8.6;
+    mesh(G.box,M('#e9dcc0'),2.4,1.4,2.4,mx,1.1,mz);
+    mesh(G.cyl,M('#e9dcc0'),.9,15,.9,mx,8.6,mz);
+    mesh(G.cyl,tile,1.0,2.2,1.0,mx,9.5,mz);
+    mesh(G.cyl,M('#d9b25a'),1.5,.35,1.5,mx,13.2,mz);
+    mesh(G.cyl,M('#e9dcc0'),.7,2.4,.7,mx,14.6,mz);
+    const cap=mesh(G.cone,tile,.85,2.2,.85,mx,16.9,mz);cap.geometry=new THREE.ConeGeometry(1,1,16);
+    mesh(G.sph,gold,.22,.22,.22,mx,18.2,mz,null,false)}
+  mesh(G.box,MAT.door[1],2.6,4,.3,X,2.4,Z+7.05);
+  mesh(G.box,MAT.grass,4,.12,4,X-8.5,.5,Z+8.5,null,false);tree(X-8.5,Z+8.5,true);
+  mesh(G.box,MAT.grass,4,.12,4,X+8.5,.5,Z+8.5,null,false);tree(X+8.5,Z+8.5,true);
+  const s=label('جامع المدينة',2.6,'rgba(31,143,166,.95)','#ffffff','#e8b84a',56);s.position.set(X,21,Z);world.add(s)}
 function plaza(X,Z){mesh(G.box,MAT.stone,B-2,.2,B-2,X,.4,Z,null,false);mesh(G.cyl,MAT.stone,5,.9,5,X,.9,Z);mesh(G.cyl,MAT.water,4.3,.3,4.3,X,1.3,Z,null,false);mesh(G.cyl,MAT.stone,.7,4,.7,X,3,Z);mesh(G.cyl,MAT.stone,2,.5,2,X,5,Z);mesh(G.cyl,MAT.water,1.6,.3,1.6,X,5.3,Z,null,false);
   for(const[a,b]of[[-1,-1],[1,-1],[-1,1],[1,1]])tree(X+a*8.5,Z+b*8.5,true);
   const s=label(CITY_NAME,4.2,'rgba(242,179,61,.95)','#2a1d05',null,60);s.position.set(X,13,Z);world.add(s)}
