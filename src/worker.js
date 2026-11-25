@@ -27,7 +27,32 @@ function cleanText(v, max) {
 function publicResident(r) {
   let h = {};
   try { h = JSON.parse(r.house || '{}'); } catch (e) {}
-  return { no: r.id, n: r.username, d: r.name || '', t: r.created, c: r.comments, h };
+  let owned = [];
+  try { owned = JSON.parse(r.owned || '[]'); } catch (e) {}
+  return { no: r.id, n: r.username, d: r.name || '', t: r.created, c: r.comments, h, rs: r.roses || 0, o: owned };
+}
+
+// ---------- اقتصاد المدينة ----------
+const SHOP = {
+  lantern: 50, oud: 80, orange: 120, aquarium: 150, car: 150, chandelier: 200, fountain: 250, floor_plus: 400
+};
+const REWARDS = [10, 15, 20, 30, 40, 60, 100];
+const BASIC = ['sofa', 'tv', 'carpet', 'shelf', 'plant', 'samovar', 'frame', 'table', 'lamp'];
+const INSIDE_RARE = ['lantern', 'oud', 'orange', 'aquarium', 'chandelier', 'fountain'];
+const bgDay = (offsetDays = 0) => new Date(Date.now() + 3 * 3600e3 + offsetDays * 86400e3).toISOString().slice(0, 10);
+function ownedOf(r) { try { return JSON.parse(r.owned || '[]'); } catch (e) { return []; } }
+async function meFull(env, r) {
+  const today = bgDay();
+  const { results: vis } = await env.DB.prepare(
+    `SELECT r.username AS n, x.day FROM roses x JOIN residents r ON r.id = x.from_id WHERE x.to_id = ? ORDER BY x.id DESC LIMIT 6`
+  ).bind(r.id).all();
+  const given = await env.DB.prepare('SELECT COUNT(*) AS c FROM roses WHERE from_id = ? AND day = ?').bind(r.id, today).first();
+  const { results: gaveTo } = await env.DB.prepare('SELECT to_id FROM roses WHERE from_id = ? AND day = ?').bind(r.id, today).all();
+  return { ...publicResident(r), coins: r.coins || 0, streak: r.streak || 0, canClaim: r.last_claim !== today, streakAlive: r.last_claim === bgDay(-1),
+    visitors: vis, rosesLeft: Math.max(0, 20 - (given?.c || 0)), gaveTo: gaveTo.map(x => x.to_id) };
+}
+async function byToken(env, t) {
+  return t ? env.DB.prepare('SELECT * FROM residents WHERE token = ?').bind(String(t)).first() : null;
 }
 
 let SITE = '';
@@ -41,7 +66,10 @@ async function ensureTable(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS residents (
     id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE, ig_id TEXT, name TEXT,
     token TEXT NOT NULL UNIQUE, created TEXT NOT NULL, comments INTEGER NOT NULL DEFAULT 1,
-    house TEXT NOT NULL DEFAULT '{}')`).run();
+    house TEXT NOT NULL DEFAULT '{}', coins INTEGER NOT NULL DEFAULT 0, streak INTEGER NOT NULL DEFAULT 0,
+    last_claim TEXT, roses INTEGER NOT NULL DEFAULT 0, owned TEXT NOT NULL DEFAULT '[]')`).run();
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS roses (id INTEGER PRIMARY KEY AUTOINCREMENT, from_id INTEGER NOT NULL,
+    to_id INTEGER NOT NULL, day TEXT NOT NULL, at TEXT NOT NULL, UNIQUE(from_id, to_id, day))`).run();
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT, path TEXT, status INTEGER, note TEXT)`).run();
   ready = true;
@@ -128,7 +156,7 @@ export default {
       // ---------- الموقع: كل سكان المدينة ----------
       if (p === '/api/city' && req.method === 'GET') {
         const { results } = await env.DB.prepare(
-          'SELECT id, username, name, created, comments, house FROM residents ORDER BY id'
+          'SELECT id, username, name, created, comments, house, roses, owned FROM residents ORDER BY id'
         ).all();
         return J({ people: results.map(publicResident) }, 200, { 'cache-control': 'public, max-age=20' });
       }
@@ -138,7 +166,7 @@ export default {
         const t = url.searchParams.get('t') || '';
         const r = t && await env.DB.prepare('SELECT * FROM residents WHERE token = ?').bind(t).first();
         if (!r) return J({ error: 'not found' }, 404);
-        return J({ me: publicResident(r) });
+        return J({ me: await meFull(env, r) });
       }
 
       // ---------- الموقع: صاحب البيت يعدّل بيته ----------
@@ -165,9 +193,10 @@ export default {
         const b = await body(req);
         const r = b.t && await env.DB.prepare('SELECT * FROM residents WHERE token = ?').bind(String(b.t)).first();
         if (!r) return J({ error: 'not found' }, 404);
-        const TYPES = ['sofa', 'tv', 'carpet', 'shelf', 'plant', 'samovar', 'frame', 'table', 'lamp'];
+        const own = ownedOf(r);
+        const TYPES = BASIC.concat(INSIDE_RARE.filter(k => own.includes(k)));
         const num = (v, lo, hi) => { const n = Number(v); return Number.isFinite(n) ? Math.max(lo, Math.min(hi, Math.round(n * 10) / 10)) : 0; };
-        const items = (Array.isArray(b.items) ? b.items : []).slice(0, 30)
+        const items = (Array.isArray(b.items) ? b.items : []).slice(0, 40)
           .filter(it => it && TYPES.includes(it.k))
           .map(it => ({ k: it.k, x: num(it.x, -4.3, 4.3), z: num(it.z, -4.3, 4.3), r: Math.max(0, Math.min(3, parseInt(it.r, 10) || 0)) }));
         let h = {};
@@ -175,6 +204,73 @@ export default {
         h.inside = { wall: Math.max(0, Math.min(7, parseInt(b.wall, 10) || 0)), floor: Math.max(0, Math.min(3, parseInt(b.floor, 10) || 0)), items };
         await env.DB.prepare('UPDATE residents SET house = ? WHERE id = ?').bind(JSON.stringify(h), r.id).run();
         return J({ ok: true, me: publicResident({ ...r, house: JSON.stringify(h) }) });
+      }
+
+      // ---------- الهدية اليومية ----------
+      if (p === '/api/claim' && req.method === 'POST') {
+        const r = await byToken(env, (await body(req)).t);
+        if (!r) return J({ error: 'not found' }, 404);
+        const today = bgDay(), yday = bgDay(-1);
+        if (r.last_claim === today) return J({ error: 'already', me: await meFull(env, r) }, 409);
+        const streak = r.last_claim === yday ? (r.streak || 0) + 1 : 1;
+        const reward = REWARDS[Math.min(streak, 7) - 1];
+        const u = await env.DB.prepare('UPDATE residents SET coins = coins + ?, streak = ?, last_claim = ? WHERE id = ? AND (last_claim IS NULL OR last_claim <> ?) RETURNING *')
+          .bind(reward, streak, today, r.id, today).first();
+        if (!u) return J({ error: 'already' }, 409);
+        return J({ ok: true, reward, streak, me: await meFull(env, u) });
+      }
+
+      // ---------- إهداء وردة ----------
+      if (p === '/api/rose' && req.method === 'POST') {
+        const b = await body(req);
+        const r = await byToken(env, b.t);
+        if (!r) return J({ error: 'not found' }, 404);
+        const to = parseInt(b.to, 10);
+        if (!to || to === r.id) return J({ error: 'bad target' }, 400);
+        const target = await env.DB.prepare('SELECT id FROM residents WHERE id = ?').bind(to).first();
+        if (!target) return J({ error: 'bad target' }, 400);
+        const today = bgDay();
+        const given = await env.DB.prepare('SELECT COUNT(*) AS c FROM roses WHERE from_id = ? AND day = ?').bind(r.id, today).first();
+        if ((given?.c || 0) >= 20) return J({ error: 'limit' }, 429);
+        const ins = await env.DB.prepare('INSERT INTO roses (from_id, to_id, day, at) VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING RETURNING id')
+          .bind(r.id, to, today, new Date().toISOString()).first();
+        if (!ins) return J({ error: 'already' }, 409);
+        await env.DB.batch([
+          env.DB.prepare('UPDATE residents SET coins = coins + 5 WHERE id = ?').bind(r.id),
+          env.DB.prepare('UPDATE residents SET coins = coins + 5, roses = roses + 1 WHERE id = ?').bind(to)
+        ]);
+        const fresh = await env.DB.prepare('SELECT * FROM residents WHERE id = ?').bind(r.id).first();
+        const tr = await env.DB.prepare('SELECT roses FROM residents WHERE id = ?').bind(to).first();
+        return J({ ok: true, me: await meFull(env, fresh), toRoses: tr.roses });
+      }
+
+      // ---------- السوق ----------
+      if (p === '/api/buy' && req.method === 'POST') {
+        const b = await body(req);
+        const r = await byToken(env, b.t);
+        if (!r) return J({ error: 'not found' }, 404);
+        const item = String(b.item || '');
+        const price = SHOP[item];
+        if (!price) return J({ error: 'bad item' }, 400);
+        const own = ownedOf(r);
+        if (own.includes(item)) return J({ error: 'owned' }, 409);
+        own.push(item);
+        const u = await env.DB.prepare('UPDATE residents SET coins = coins - ?, owned = ? WHERE id = ? AND coins >= ? RETURNING *')
+          .bind(price, JSON.stringify(own), r.id, price).first();
+        if (!u) return J({ error: 'poor' }, 402);
+        return J({ ok: true, me: await meFull(env, u) });
+      }
+
+      // ---------- لوحة الشرف ----------
+      if (p === '/api/top' && req.method === 'GET') {
+        const since = bgDay(-6);
+        const { results: loved } = await env.DB.prepare(
+          `SELECT r.id AS no, r.username AS n, COUNT(*) AS c FROM roses x JOIN residents r ON r.id = x.to_id WHERE x.day >= ? GROUP BY x.to_id ORDER BY c DESC LIMIT 5`
+        ).bind(since).all();
+        const { results: givers } = await env.DB.prepare(
+          `SELECT r.id AS no, r.username AS n, COUNT(*) AS c FROM roses x JOIN residents r ON r.id = x.from_id WHERE x.day >= ? GROUP BY x.from_id ORDER BY c DESC LIMIT 5`
+        ).bind(since).all();
+        return J({ loved, givers }, 200, { 'cache-control': 'public, max-age=30' });
       }
 
       // ---------- إلك انت: حذف ساكن مسيء ----------
